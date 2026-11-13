@@ -894,6 +894,49 @@ body::before {
     letter-spacing: 1.5px;
 }
 
+/* Alert feed rows from API */
+.alert-time-tag {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 4px;
+}
+.alert-time {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--text-secondary, #7a86a8);
+    font-weight: 600;
+}
+.alert-level {
+    font-family: var(--mono);
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 1px 6px;
+    border-radius: 3px;
+}
+.alert-level.critical { background: rgba(239,68,68,0.15); color: #ef4444; }
+.alert-level.high { background: rgba(249,115,22,0.15); color: #f97316; }
+.alert-level.moderate { background: rgba(234,179,8,0.15); color: #eab308; }
+.alert-level.info { background: rgba(34,211,238,0.12); color: #22d3ee; }
+.alert-msg {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--text-0, #e8ecf5);
+    line-height: 1.4;
+}
+.pulse-ring {
+    transform-origin: center;
+    animation: ring-pulse 2.2s ease-out infinite;
+}
+@keyframes ring-pulse {
+    0%   { transform: scale(0.6); opacity: 0.9; }
+    100% { transform: scale(1.6); opacity: 0; }
+}
+.status-active { color: #ef4444; font-weight: 600; font-size: 0.7rem; }
+.status-contained { color: #22c55e; font-weight: 600; font-size: 0.7rem; }
+.row-id { color: #a78bfa; font-weight: 600; }
+
 /* ============================================================
    RESPONSIVE
    ============================================================ */
