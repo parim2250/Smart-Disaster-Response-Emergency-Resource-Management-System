@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SENTINEL — Emergency Command Interface</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+    <!-- ===== SIDEBAR ===== -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-mark">
+                <svg viewBox="0 0 32 32" width="30" height="30">
+                    <path d="M16 2 L28 7 V17 C28 23 22 28 16 30 C10 28 4 23 4 17 V7 Z"
+                          fill="none" stroke="#22d3ee" stroke-width="2" stroke-linejoin="round"/>
+                    <path d="M16 10 V22 M10 16 H22" stroke="#22d3ee" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+            </div>
+            <div class="brand-info">
+                <h1>SENTINEL</h1>
+                <p>EMERGENCY COMMAND</p>
+            </div>
+        </div>
+
+        <nav class="side-nav">
+            <div class="nav-section">
+                <span class="nav-section-label">OPERATIONS</span>
+                <a href="#" class="nav-item active" data-page="dashboard">
+                    <span class="nav-ico">◉</span><span>Command Overview</span>
+                </a>
+                <a href="#" class="nav-item" data-page="incidents">
+                    <span class="nav-ico">⚠</span><span>Incidents</span>
+                    <span class="nav-badge" id="nav-badge-incidents">—</span>
+                </a>
+                <a href="#" class="nav-item" data-page="victims">
+                    <span class="nav-ico">◈</span><span>Victims</span>
+                </a>
+                <a href="#" class="nav-item" data-page="requests">
+                    <span class="nav-ico">▲</span><span>Emergency Requests</span>
+                </a>
+            </div>
+
+            <div class="nav-section">
+                <span class="nav-section-label">RESOURCES</span>
+                <a href="#" class="nav-item" data-page="ambulances">
+                    <span class="nav-ico">⛨</span><span>Ambulance Fleet</span>
+                </a>
+                <a href="#" class="nav-item" data-page="rescue-teams">
+                    <span class="nav-ico">⛭</span><span>Rescue Teams</span>
+                </a>
+                <a href="#" class="nav-item" data-page="hospitals">
+                    <span class="nav-ico">✚</span><span>Hospitals &amp; Beds</span>
+                </a>
+                <a href="#" class="nav-item" data-page="resources">
+                    <span class="nav-ico">▣</span><span>Medical Resources</span>
+                </a>
+                <a href="#" class="nav-item" data-page="blood">
+                    <span class="nav-ico">◆</span><span>Blood Stock</span>
+                </a>
+            </div>
+
+            <div class="nav-section">
+                <span class="nav-section-label">INTEL</span>
+                <a href="#" class="nav-item" data-page="responses">
+                    <span class="nav-ico">⟳</span><span>Response Log</span>
+                </a>
+                <a href="#" class="nav-item" data-page="reports">
+                    <span class="nav-ico">▤</span><span>Reports</span>
+                </a>
+            </div>
+        </nav>
+
+        <div class="sidebar-foot">
+            <div class="link-status">
+                <span class="status-indicator" id="db-link-dot"></span>
+                <div>
+                    <div class="link-label">DATABASE LINK</div>
+                    <div class="link-value" id="db-link-value">CHECKING…</div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ===== MAIN ===== -->
+    <div class="shell">
+
+        <!-- TOP BAR -->
+        <header class="topbar">
+            <button class="sb-toggle" id="sb-toggle" aria-label="Toggle sidebar">☰</button>
+
+            <div class="page-title-group">
+                <h2 class="page-title" id="page-title">COMMAND OVERVIEW</h2>
+                <div class="page-crumb">OPS // LIVE MONITORING</div>
+            </div>
+
+            <div class="sys-pills">
+                <span class="sys-pill"><span class="pill-dot green"></span>DB</span>
+                <span class="sys-pill"><span class="pill-dot green"></span>API</span>
+                <span class="sys-pill"><span class="pill-dot cyan"></span>COMMS</span>
+                <span class="sys-pill alert"><span class="pill-dot red pulse"></span>ALERT</span>
+            </div>
+
+            <div class="topbar-right">
+                <div class="clock">
+                    <div class="clock-time" id="clock-time">--:--:--</div>
+                    <div class="clock-date" id="clock-date">—</div>
+                </div>
+                <div class="user">
+                    <div class="user-avatar">A</div>
+                    <div class="user-meta">
+                        <div class="user-name">ADMIN</div>
+                        <div class="user-role">OPS COMMANDER</div>
+                    </div>
+                </div>
+                <button class="btn-ghost danger">LOGOUT</button>
+            </div>
+        </header>
+
+        <!-- CONTENT -->
+        <main class="content">
+
+            <!-- STAT STRIPS -->
+            <section class="stat-strip">
+                <div class="stat-cell accent-red">
+                    <div class="stat-top"><span class="stat-key">ACTIVE INCIDENTS</span><span class="stat-mark">⚠</span></div>
+                    <div class="stat-num" id="s-incidents">—</div>
+                    <div class="stat-meta" id="s-incidents-meta">awaiting data</div>
+                </div>
+                <div class="stat-cell accent-cyan">
+                    <div class="stat-top"><span class="stat-key">TOTAL VICTIMS</span><span class="stat-mark">◈</span></div>
+                    <div class="stat-num" id="s-victims">—</div>
+                    <div class="stat-meta" id="s-victims-meta">awaiting data</div>
+                </div>
+                <div class="stat-cell accent-green">
+                    <div class="stat-top"><span class="stat-key">AMBULANCES AVL</span><span class="stat-mark">⛨</span></div>
+                    <div class="stat-num" id="s-ambulances">—</div>
+                    <div class="stat-meta" id="s-ambulances-meta">awaiting data</div>
+                </div>
+                <div class="stat-cell accent-orange">
+                    <div class="stat-top"><span class="stat-key">TEAMS DEPLOYED</span><span class="stat-mark">⛭</span></div>
+                    <div class="stat-num" id="s-teams">—</div>
+                    <div class="stat-meta" id="s-teams-meta">awaiting data</div>
+                </div>
+                <div class="stat-cell accent-purple">
+                    <div class="stat-top"><span class="stat-key">HOSPITAL BEDS</span><span class="stat-mark">✚</span></div>
+                    <div class="stat-num" id="s-beds">—</div>
+                    <div class="stat-meta" id="s-beds-meta">awaiting data</div>
+                </div>
+                <div class="stat-cell accent-yellow">
+                    <div class="stat-top"><span class="stat-key">ALERTS (24H)</span><span class="stat-mark">▲</span></div>
+                    <div class="stat-num" id="s-alerts">—</div>
+                    <div class="stat-meta" id="s-alerts-meta">awaiting data</div>
+                </div>
+            </section>
+
+            <!-- ROW 1: Map + Severity + Alerts -->
+            <section class="grid-row row-1">
+
+                <!-- INCIDENT MAP -->
+                <div class="panel panel-map">
+                    <div class="panel-head">
+                        <div class="panel-heading">
+                            <span class="corner-mark"></span>
+                            <span class="panel-title-text">INCIDENT MONITORING GRID</span>
+                            <span class="live-tag"><span class="live-pip"></span>LIVE</span>
+                        </div>
+                        <div class="legend">
+                            <span class="lg-item"><span class="lg-dot red"></span>CRIT</span>
+                            <span class="lg-item"><span class="lg-dot orange"></span>HIGH</span>
+                            <span class="lg-item"><span class="lg-dot yellow"></span>MOD</span>
+                            <span class="lg-item"><span class="lg-dot green"></span>LOW</span>
+                        </div>
+                    </div>
+
+                    <div class="map-canvas">
+                        <svg class="map-svg" viewBox="0 0 800 420" preserveAspectRatio="xMidYMid slice">
+                            <defs>
+                                <pattern id="gridA" width="40" height="40" patternUnits="userSpaceOnUse">
+                                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(34,211,238,0.05)" stroke-width="1"/>
+                                </pattern>
+                                <pattern id="gridB" width="200" height="200" patternUnits="userSpaceOnUse">
+                                    <path d="M 200 0 L 0 0 0 200" fill="none" stroke="rgba(34,211,238,0.1)" stroke-width="1"/>
+                                </pattern>
+                                <radialGradient id="scanGlow">
+                                    <stop offset="0%" stop-color="rgba(34,211,238,0.12)"/>
+                                    <stop offset="100%" stop-color="rgba(34,211,238,0)"/>
+                                </radialGradient>
+                            </defs>
+
+                            <rect width="800" height="420" fill="url(#gridA)"/>
+                            <rect width="800" height="420" fill="url(#gridB)"/>
+
+                            <!-- Sector label -->
+                            <g transform="translate(20,24)">
+                                <text x="0" y="0" fill="#22d3ee" font-family="JetBrains Mono" font-size="10" letter-spacing="2" opacity="0.85">SECTOR 07-A // GRID N</text>
+                            </g>
+                            <g transform="translate(760,24)" text-anchor="end">
+                                <text x="0" y="0" fill="#6b7a95" font-family="JetBrains Mono" font-size="10" letter-spacing="1.5">SCAN: ACTIVE</text>
+                            </g>
+
+                            <!-- Concentric scan rings -->
+                            <g transform="translate(400,220)" opacity="0.55">
+                                <circle r="70"  fill="url(#scanGlow)" stroke="#22d3ee" stroke-width="0.8" opacity="0.5"/>
+                                <circle r="140" fill="none" stroke="#22d3ee" stroke-width="0.8" opacity="0.35"/>
+                                <circle r="200" fill="none" stroke="#22d3ee" stroke-width="0.6" opacity="0.22" stroke-dasharray="4 5"/>
+                                <line x1="-200" y1="0" x2="200" y2="0" stroke="#22d3ee" stroke-width="0.4" opacity="0.2"/>
+                                <line x1="0" y1="-200" x2="0" y2="200" stroke="#22d3ee" stroke-width="0.4" opacity="0.2"/>
+                            </g>
+
+                            <!-- Stylized region outline -->
+                            <path d="M 110 90 Q 240 50 400 80 Q 560 60 680 130 Q 720 220 650 320 Q 520 380 360 370 Q 190 360 120 290 Q 70 190 110 90 Z"
+                                  fill="rgba(34,211,238,0.02)" stroke="rgba(167,139,250,0.3)" stroke-width="1.2" stroke-dasharray="5 4"/>
+
+                            <!-- Awaiting data message -->
+                            <g transform="translate(400,220)" text-anchor="middle" id="map-placeholder">
+                                <text y="-6" fill="#8b9bb8" font-family="JetBrains Mono" font-size="12" letter-spacing="3">NO ACTIVE INCIDENTS</text>
+                                <text y="14" fill="#5a6a85" font-family="JetBrains Mono" font-size="10" letter-spacing="2">LIVE FEED AWAITING DATABASE SYNC</text>
+                            </g>
+                        </svg>
+
+                        <!-- Map footer bar -->
+                        <div class="map-footer">
+                            <div class="mf-item"><span class="mf-key">INCIDENTS</span><span class="mf-val" id="mf-incidents">—</span></div>
+                            <div class="mf-sep"></div>
+                            <div class="mf-item"><span class="mf-key">UNITS ON SCENE</span><span class="mf-val" id="mf-units">—</span></div>
+                            <div class="mf-sep"></div>
+                            <div class="mf-item"><span class="mf-key">LAST SYNC</span><span class="mf-val" id="mf-sync">—</span></div>
+                            <div class="mf-sep"></div>
+                            <div class="mf-item"><span class="mf-key">SECTOR</span><span class="mf-val cyan">07-A</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RIGHT COLUMN -->
+                <div class="side-col">
+
+                    <!-- SEVERITY BREAKDOWN -->
+                    <div class="panel">
+                        <div class="panel-head compact">
+                            <div class="panel-heading">
+                                <span class="corner-mark"></span>
+                                <span class="panel-title-text">SEVERITY BREAKDOWN</span>
+                            </div>
+                        </div>
+                        <div class="sev-list">
+                            <div class="sev-row">
+                                <span class="sev-tag critical">CRITICAL</span>
+                                <div class="sev-bar"><div class="sev-fill crit" style="width:0%"></div></div>
+                                <span class="sev-count" id="sev-critical">0</span>
+                            </div>
+                            <div class="sev-row">
+                                <span class="sev-tag high">HIGH</span>
+                                <div class="sev-bar"><div class="sev-fill high" style="width:0%"></div></div>
+                                <span class="sev-count" id="sev-high">0</span>
+                            </div>
+                            <div class="sev-row">
+                                <span class="sev-tag moderate">MODERATE</span>
+                                <div class="sev-bar"><div class="sev-fill mod" style="width:0%"></div></div>
+                                <span class="sev-count" id="sev-moderate">0</span>
+                            </div>
+                            <div class="sev-row">
+                                <span class="sev-tag low">LOW</span>
+                                <div class="sev-bar"><div class="sev-fill low" style="width:0%"></div></div>
+                                <span class="sev-count" id="sev-low">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- EMERGENCY ALERT FEED -->
+                    <div class="panel">
+                        <div class="panel-head compact">
+                            <div class="panel-heading">
+                                <span class="corner-mark red"></span>
+                                <span class="panel-title-text">ALERT FEED</span>
+                            </div>
+                            <span class="count-pill" id="alerts-count">0</span>
+                        </div>
+                        <div class="alert-feed" id="alert-feed">
+                            <div class="feed-empty">
+                                <span>⌁</span>
+                                <p>NO ALERTS IN FEED</p>
+                                <small>Alerts will appear here once the database is synced.</small>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+            <!-- ROW 2: Fleet / Beds / Blood / Resources -->
+            <section class="grid-row row-2">
+
+                <div class="panel">
+                    <div class="panel-head compact">
+                        <div class="panel-heading">
+                            <span class="corner-mark"></span>
+                            <span class="panel-title-text">AMBULANCE FLEET STATUS</span>
+                        </div>
+                        <a href="#" class="panel-link" data-page="ambulances">VIEW ALL →</a>
+                    </div>
+                    <div class="mini-stats">
+                        <div class="mini-stat"><span class="ms-num" id="fleet-available">—</span><span class="ms-lbl">AVAILABLE</span></div>
+                        <div class="mini-stat"><span class="ms-num orange" id="fleet-dispatched">—</span><span class="ms-lbl">DISPATCHED</span></div>
+                        <div class="mini-stat"><span class="ms-num red" id="fleet-oos">—</span><span class="ms-lbl">OUT OF SVC</span></div>
+                    </div>
+                    <div class="bar-track">
+                        <div class="bar-fill cyan" id="fleet-bar" style="width:0%"></div>
+                    </div>
+                    <div class="bar-caption"><span id="fleet-ratio">— / — units operational</span></div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head compact">
+                        <div class="panel-heading">
+                            <span class="corner-mark"></span>
+                            <span class="panel-title-text">HOSPITAL BED CAPACITY</span>
+                        </div>
+                        <a href="#" class="panel-link" data-page="hospitals">VIEW ALL →</a>
+                    </div>
+                    <div class="mini-stats">
+                        <div class="mini-stat"><span class="ms-num" id="bed-available">—</span><span class="ms-lbl">AVAILABLE</span></div>
+                        <div class="mini-stat"><span class="ms-num orange" id="bed-occupied">—</span><span class="ms-lbl">OCCUPIED</span></div>
+                        <div class="mini-stat"><span class="ms-num" id="bed-total">—</span><span class="ms-lbl">TOTAL</span></div>
+                    </div>
+                    <div class="bar-track">
+                        <div class="bar-fill purple" id="bed-bar" style="width:0%"></div>
+                    </div>
+                    <div class="bar-caption"><span id="bed-ratio">— % capacity used</span></div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head compact">
+                        <div class="panel-heading">
+                            <span class="corner-mark red"></span>
+                            <span class="panel-title-text">BLOOD STOCK INDEX</span>
+                        </div>
+                        <a href="#" class="panel-link" data-page="blood">VIEW ALL →</a>
+                    </div>
+                    <div class="blood-grid" id="blood-grid">
+                        <div class="blood-cell"><span class="bc-type">A+</span><span class="bc-qty">—</span></div>
+                        <div class="blood-cell"><span class="bc-type">A−</span><span class="bc-qty">—</span></div>
+                        <div class="blood-cell"><span class="bc-type">B+</span><span class="bc-qty">—</span></div>
+                        <div class="blood-cell"><span class="bc-type">B−</span><span class="bc-qty">—</span></div>
+                        <div class="blood-cell"><span class="bc-type">AB+</span><span class="bc-qty">—</span></div>
+                        <div class="blood-cell"><span class="bc-type">AB−</span><span class="bc-qty">—</span></div>
+                        <div class="blood-cell"><span class="bc-type">O+</span><span class="bc-qty">—</span></div>
+                        <div class="blood-cell"><span class="bc-type">O−</span><span class="bc-qty">—</span></div>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- ROW 3: Recent Incidents + Response Log -->
+            <section class="grid-row row-3">
+
+                <div class="panel">
+                    <div class="panel-head compact">
+                        <div class="panel-heading">
+                            <span class="corner-mark"></span>
+                            <span class="panel-title-text">RECENT INCIDENTS</span>
+                        </div>
+                        <a href="#" class="panel-link" data-page="incidents">VIEW ALL →</a>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>TYPE</th>
+                                    <th>LOCATION</th>
+                                    <th>SEV</th>
+                                    <th>STATUS</th>
+                                    <th>TIME</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recent-incidents-body">
+                                <tr class="empty-row">
+                                    <td colspan="6">NO INCIDENT RECORDS — AWAITING DATABASE SYNC</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head compact">
+                        <div class="panel-heading">
+                            <span class="corner-mark"></span>
+                            <span class="panel-title-text">RECENT RESPONSES</span>
+                        </div>
+                        <a href="#" class="panel-link" data-page="responses">VIEW ALL →</a>
+                    </div>
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>RESP ID</th>
+                                    <th>INCIDENT</th>
+                                    <th>UNIT</th>
+                                    <th>RESP TIME</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recent-responses-body">
+                                <tr class="empty-row">
+                                    <td colspan="4">NO RESPONSE RECORDS — AWAITING DATABASE SYNC</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </section>
+
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
