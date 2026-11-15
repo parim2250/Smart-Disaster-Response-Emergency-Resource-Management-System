@@ -1,5 +1,5 @@
 """
-SENTINEL API routes — dashboard and module read endpoints.
+SENTINEL API routes — dashboard and module read/write endpoints.
 """
 
 from flask import Blueprint, jsonify, request
@@ -46,9 +46,11 @@ def run_write(query, params=None):
         cursor = conn.cursor()
         cursor.execute(query, params or ())
         conn.commit()
-        return cursor.lastrowid, None
+        last_id = cursor.lastrowid
+        return last_id, None
     except Error as e:
-        conn.rollback()
+        if conn:
+            conn.rollback()
         return None, str(e)
     finally:
         close_connection(conn, cursor)
@@ -69,7 +71,8 @@ def call_procedure(proc_name, args=None):
         conn.commit()
         return results, None
     except Error as e:
-        conn.rollback()
+        if conn:
+            conn.rollback()
         return None, str(e)
     finally:
         close_connection(conn, cursor)
@@ -85,7 +88,6 @@ def dashboard_stats():
     if err:
         return jsonify({'status': 'error', 'message': err}), 500
 
-    # Extra breakdowns
     severity, _ = fetch_all('SELECT * FROM view_severity_breakdown')
     fleet, _ = fetch_all('SELECT * FROM view_ambulance_status')
     blood, _ = fetch_all('SELECT blood_group, units_available FROM blood_stock ORDER BY blood_group')
@@ -97,7 +99,6 @@ def dashboard_stats():
         FROM hospitals
     ''')
 
-    # Normalize severity into fixed keys
     sev_map = {'CRITICAL': 0, 'HIGH': 0, 'MODERATE': 0, 'LOW': 0}
     if severity:
         for s in severity:
@@ -157,19 +158,18 @@ def dashboard_alerts():
 def map_incidents():
     rows, err = fetch_all('''
         SELECT incident_id, title, incident_type, severity, status,
-               location_desc, latitude, longitude,
+               location_desc,
+               COALESCE(latitude, 28.5355) AS latitude,
+               COALESCE(longitude, 77.3910) AS longitude,
                (SELECT COUNT(*) FROM dispatch_ambulances da
                 WHERE da.incident_id = i.incident_id
                   AND da.status IN ('EN_ROUTE','ON_SCENE')) AS units_on_scene
         FROM incidents i
         WHERE status IN ('ACTIVE', 'CONTAINED')
-          AND latitude IS NOT NULL
-          AND longitude IS NOT NULL
     ''')
     if err:
         return jsonify({'status': 'error', 'message': err}), 500
     return jsonify({'status': 'success', 'data': rows or []})
-
 
 # =====================================================================
 # INCIDENTS
@@ -223,18 +223,81 @@ def create_incident():
         if not data.get(f):
             return jsonify({'status': 'error', 'message': f'Missing field: {f}'}), 400
 
-    results, err = call_procedure('sp_register_incident', [
-        data['title'],
-        data['incident_type'],
-        data['severity'],
-        data['location_desc'],
-        data.get('latitude'),
-        data.get('longitude')
-    ])
-    if err:
-        return jsonify({'status': 'error', 'message': err}), 500
-    return jsonify({'status': 'success', 'data': results[0][0] if results and results[0] else {}}), 201
+    # --- normalize enums to match MySQL ENUM values ---
+    type_map = {
+        'FIRE': 'FIRE',
+        'WILDFIRE': 'WILDFIRE',
+        'FLOOD': 'FLOOD',
+        'EARTHQUAKE': 'EARTHQUAKE',
+        'ACCIDENT': 'ACCIDENT',
+        'MULTI-VEHICLE ACCIDENT': 'ACCIDENT',
+        'MULTI_VEHICLE_ACCIDENT': 'ACCIDENT',
+        'HAZMAT': 'HAZMAT',
+        'BUILDING COLLAPSE': 'BUILDING_COLLAPSE',
+        'BUILDING_COLLAPSE': 'BUILDING_COLLAPSE',
+        'INDUSTRIAL ACCIDENT': 'ACCIDENT',
+        'OTHER': 'OTHER',
+    }
+    raw_type = str(data['incident_type']).strip().upper().replace('-', '_')
+    # allow already-correct values; map friendly names
+    incident_type = type_map.get(raw_type, type_map.get(raw_type.replace('_', ' '), raw_type))
+    # final fallback if DB only has a smaller set
+    allowed_types = {
+        'WILDFIRE', 'FIRE', 'FLOOD', 'EARTHQUAKE', 'ACCIDENT',
+        'HAZMAT', 'BUILDING_COLLAPSE', 'OTHER'
+    }
+    if incident_type not in allowed_types:
+        # last-resort: keep short token so VARCHAR/ENUM won't choke
+        incident_type = raw_type[:32]
 
+    sev_map = {
+        'CRITICAL': 'CRITICAL',
+        'HIGH': 'HIGH',
+        'MODERATE': 'MODERATE',
+        'MEDIUM': 'MODERATE',
+        'LOW': 'LOW',
+    }
+    severity = sev_map.get(str(data['severity']).strip().upper(), 'MODERATE')
+
+    # coords
+    lat = data.get('latitude')
+    lng = data.get('longitude')
+    try:
+        lat = float(lat) if lat is not None and str(lat).strip() != '' else None
+    except (ValueError, TypeError):
+        lat = None
+    try:
+        lng = float(lng) if lng is not None and str(lng).strip() != '' else None
+    except (ValueError, TypeError):
+        lng = None
+
+    title = str(data['title']).strip()[:200]
+    location_desc = str(data['location_desc']).strip()[:255]
+
+    # 1) try stored procedure
+    results, err = call_procedure('sp_register_incident', [
+        title, incident_type, severity, location_desc, lat, lng
+    ])
+    if not err and results and results[0]:
+        return jsonify({'status': 'success', 'data': results[0][0]}), 201
+
+    # 2) guaranteed direct insert + commit
+    last_id, write_err = run_write('''
+        INSERT INTO incidents
+            (title, incident_type, severity, location_desc, latitude, longitude, status, reported_time)
+        VALUES (%s, %s, %s, %s, %s, %s, 'ACTIVE', NOW())
+    ''', (title, incident_type, severity, location_desc, lat, lng))
+
+    if write_err:
+        # if ENUM still rejects, return a clear message
+        return jsonify({
+            'status': 'error',
+            'message': write_err,
+            'hint': 'Check incidents.incident_type ENUM values in MySQL. Sent type=' + incident_type
+        }), 500
+
+    row, _ = fetch_one('SELECT * FROM incidents WHERE incident_id = %s', (last_id,))
+    return jsonify({'status': 'success', 'data': row or {'incident_id': last_id}}), 201
 
 @api_bp.route('/incidents/<int:incident_id>/status', methods=['PUT'])
 def update_incident_status(incident_id):

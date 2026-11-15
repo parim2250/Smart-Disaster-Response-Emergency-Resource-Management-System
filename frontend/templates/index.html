@@ -8,8 +8,18 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+        <!-- Leaflet Map CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+        <!-- Leaflet Interactive Tactical Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
-<body>
+<body>'                                      '
 
     <!-- ===== SIDEBAR ===== -->
     <aside class="sidebar" id="sidebar">
@@ -162,12 +172,13 @@
             <section class="grid-row row-1">
 
                 <!-- INCIDENT MAP -->
+                              <!-- INCIDENT MAP PANEL -->
                 <div class="panel panel-map">
                     <div class="panel-head">
                         <div class="panel-heading">
                             <span class="corner-mark"></span>
                             <span class="panel-title-text">INCIDENT MONITORING GRID</span>
-                            <span class="live-tag"><span class="live-pip"></span>LIVE</span>
+                            <span class="live-tag"><span class="live-pip"></span>LIVE TACTICAL MAP</span>
                         </div>
                         <div class="legend">
                             <span class="lg-item"><span class="lg-dot red"></span>CRIT</span>
@@ -177,51 +188,8 @@
                         </div>
                     </div>
 
-                    <div class="map-canvas">
-                        <svg class="map-svg" viewBox="0 0 800 420" preserveAspectRatio="xMidYMid slice">
-                            <defs>
-                                <pattern id="gridA" width="40" height="40" patternUnits="userSpaceOnUse">
-                                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(34,211,238,0.05)" stroke-width="1"/>
-                                </pattern>
-                                <pattern id="gridB" width="200" height="200" patternUnits="userSpaceOnUse">
-                                    <path d="M 200 0 L 0 0 0 200" fill="none" stroke="rgba(34,211,238,0.1)" stroke-width="1"/>
-                                </pattern>
-                                <radialGradient id="scanGlow">
-                                    <stop offset="0%" stop-color="rgba(34,211,238,0.12)"/>
-                                    <stop offset="100%" stop-color="rgba(34,211,238,0)"/>
-                                </radialGradient>
-                            </defs>
-
-                            <rect width="800" height="420" fill="url(#gridA)"/>
-                            <rect width="800" height="420" fill="url(#gridB)"/>
-
-                            <!-- Sector label -->
-                            <g transform="translate(20,24)">
-                                <text x="0" y="0" fill="#22d3ee" font-family="JetBrains Mono" font-size="10" letter-spacing="2" opacity="0.85">SECTOR 07-A // GRID N</text>
-                            </g>
-                            <g transform="translate(760,24)" text-anchor="end">
-                                <text x="0" y="0" fill="#6b7a95" font-family="JetBrains Mono" font-size="10" letter-spacing="1.5">SCAN: ACTIVE</text>
-                            </g>
-
-                            <!-- Concentric scan rings -->
-                            <g transform="translate(400,220)" opacity="0.55">
-                                <circle r="70"  fill="url(#scanGlow)" stroke="#22d3ee" stroke-width="0.8" opacity="0.5"/>
-                                <circle r="140" fill="none" stroke="#22d3ee" stroke-width="0.8" opacity="0.35"/>
-                                <circle r="200" fill="none" stroke="#22d3ee" stroke-width="0.6" opacity="0.22" stroke-dasharray="4 5"/>
-                                <line x1="-200" y1="0" x2="200" y2="0" stroke="#22d3ee" stroke-width="0.4" opacity="0.2"/>
-                                <line x1="0" y1="-200" x2="0" y2="200" stroke="#22d3ee" stroke-width="0.4" opacity="0.2"/>
-                            </g>
-
-                            <!-- Stylized region outline -->
-                            <path d="M 110 90 Q 240 50 400 80 Q 560 60 680 130 Q 720 220 650 320 Q 520 380 360 370 Q 190 360 120 290 Q 70 190 110 90 Z"
-                                  fill="rgba(34,211,238,0.02)" stroke="rgba(167,139,250,0.3)" stroke-width="1.2" stroke-dasharray="5 4"/>
-
-                            <!-- Awaiting data message -->
-                            <g transform="translate(400,220)" text-anchor="middle" id="map-placeholder">
-                                <text y="-6" fill="#8b9bb8" font-family="JetBrains Mono" font-size="12" letter-spacing="3">NO ACTIVE INCIDENTS</text>
-                                <text y="14" fill="#5a6a85" font-family="JetBrains Mono" font-size="10" letter-spacing="2">LIVE FEED AWAITING DATABASE SYNC</text>
-                            </g>
-                        </svg>
+                    <div class="map-container-wrap">
+                        <div id="tactical-map"></div>
 
                         <!-- Map footer bar -->
                         <div class="map-footer">
@@ -231,7 +199,7 @@
                             <div class="mf-sep"></div>
                             <div class="mf-item"><span class="mf-key">LAST SYNC</span><span class="mf-val" id="mf-sync">—</span></div>
                             <div class="mf-sep"></div>
-                            <div class="mf-item"><span class="mf-key">SECTOR</span><span class="mf-val cyan">07-A</span></div>
+                            <div class="mf-item"><span class="mf-key">SECTOR</span><span class="mf-val cyan">TACTICAL-GLOBAL</span></div>
                         </div>
                     </div>
                 </div>

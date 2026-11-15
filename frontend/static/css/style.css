@@ -929,6 +929,312 @@ body::before {
     transform-origin: center;
     animation: ring-pulse 2.2s ease-out infinite;
 }
+
+.module-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: rgba(11, 16, 32, 0.6);
+    border: 1px solid var(--border-1);
+    border-radius: 6px;
+    margin-bottom: 14px;
+}
+
+.toolbar-title {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: var(--cyan);
+}
+
+.btn-cyan {
+    background: rgba(34, 211, 238, 0.12);
+    border: 1px solid var(--cyan);
+    color: var(--cyan);
+    padding: 7px 14px;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-cyan:hover {
+    background: var(--cyan);
+    color: #000;
+    box-shadow: 0 0 12px var(--cyan);
+}
+
+.btn-sm {
+    padding: 4px 8px;
+    font-size: 0.62rem;
+}
+
+/* Modal Overlay */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(4, 7, 16, 0.85);
+    backdrop-filter: blur(6px);
+    display: grid;
+    place-items: center;
+    z-index: 1000;
+    padding: 16px;
+}
+
+.modal-overlay.hidden { display: none; }
+
+.modal-box {
+    width: min(580px, 95%);
+    background: var(--bg-panel);
+    border: 1px solid var(--border-2);
+    border-radius: 6px;
+    box-shadow: 0 0 30px rgba(34, 211, 238, 0.15);
+    overflow: hidden;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 18px;
+    background: rgba(7, 10, 20, 0.8);
+    border-bottom: 1px solid var(--border-1);
+}
+
+.modal-header h3 {
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    letter-spacing: 2px;
+    color: var(--cyan);
+}
+
+.modal-close {
+    background: transparent;
+    border: none;
+    color: var(--text-2);
+    font-size: 1.1rem;
+    cursor: pointer;
+}
+.modal-close:hover { color: var(--red); }
+
+.modal-body {
+    padding: 18px;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.form-grid .full { grid-column: 1 / -1; }
+
+.form-group label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 0.62rem;
+    letter-spacing: 1.5px;
+    color: var(--text-2);
+    margin-bottom: 4px;
+}
+
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    background: #070a14;
+    border: 1px solid var(--border-1);
+    border-radius: 4px;
+    color: var(--text-0);
+    padding: 8px 10px;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    outline: none;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    border-color: var(--cyan);
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.2);
+}
+
+.modal-footer {
+    padding: 12px 18px;
+    border-top: 1px solid var(--border-1);
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    background: rgba(7, 10, 20, 0.5);
+}
+/* ============================================================
+   REAL TACTICAL MAP STYLES (LEAFLET)
+   ============================================================ */
+.map-canvas {
+    position: relative;
+    overflow: hidden;
+}
+
+/* Radar Scan Animation over the real map */
+.radar-scan-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+    background: 
+        radial-gradient(circle at center, transparent 30%, rgba(11, 16, 32, 0.4) 100%),
+        repeating-radial-gradient(circle at center, transparent, transparent 40px, rgba(34, 211, 238, 0.05) 41px, transparent 42px);
+}
+.radar-scan-overlay::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 200vw; height: 200vw;
+    background: conic-gradient(from 0deg, transparent 70%, rgba(34, 211, 238, 0.15) 100%);
+    transform-origin: 0 0;
+    animation: radar-spin 4s linear infinite;
+}
+@keyframes radar-spin {
+    100% { transform: rotate(360deg); }
+}
+
+/* Leaflet Dark Theme Overrides */
+.leaflet-container {
+    background: #060915 !important;
+    font-family: var(--mono) !important;
+}
+.leaflet-popup-content-wrapper, .leaflet-popup-tip {
+    background: rgba(11, 16, 32, 0.95) !important;
+    border: 1px solid var(--cyan) !important;
+    color: var(--text-0) !important;
+    box-shadow: 0 0 15px rgba(34, 211, 238, 0.2);
+    border-radius: 4px !important;
+}
+
+/* Tactical Markers */
+.tactical-marker {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-radius: 50%;
+    font-size: 14px;
+    position: relative;
+}
+.tactical-marker::before {
+    content: '';
+    position: absolute;
+    inset: -10px;
+    border-radius: 50%;
+    border: 1px solid currentColor;
+    opacity: 0.5;
+    animation: pulse-ring 2s infinite ease-out;
+}
+.tactical-marker::after {
+    content: '';
+    position: absolute;
+    inset: -20px;
+    border-radius: 50%;
+    border: 1px solid currentColor;
+    opacity: 0.15;
+}
+
+/* ============================================================
+   TACTICAL LEAFLET MAP STYLES
+   ============================================================ */
+.map-container-wrap {
+    position: relative;
+    width: 100%;
+    height: 420px;
+    display: flex;
+    flex-direction: column;
+    background: #050814;
+}
+
+#tactical-map {
+    width: 100%;
+    flex: 1;
+    min-height: 370px;
+    background: #050814 !important;
+    z-index: 1;
+}
+
+.leaflet-container {
+    background: #050814 !important;
+    font-family: var(--mono) !important;
+}
+
+/* Custom Tactical Popups */
+.leaflet-popup-content-wrapper {
+    background: rgba(11, 16, 32, 0.95) !important;
+    border: 1px solid var(--cyan) !important;
+    color: var(--text-0) !important;
+    box-shadow: 0 0 20px rgba(34, 211, 238, 0.25);
+    border-radius: 4px !important;
+    padding: 2px !important;
+}
+.leaflet-popup-tip {
+    background: rgba(11, 16, 32, 0.95) !important;
+    border: 1px solid var(--cyan) !important;
+}
+
+/* Hazard Circle Markers */
+.tactical-marker {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-radius: 50%;
+    font-size: 15px;
+    position: relative;
+    cursor: pointer;
+}
+
+.marker-crit {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.25);
+    border: 2px solid #ef4444;
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.8);
+}
+.marker-high {
+    color: #f97316;
+    background: rgba(249, 115, 22, 0.25);
+    border: 2px solid #f97316;
+    box-shadow: 0 0 18px rgba(249, 115, 22, 0.7);
+}
+.marker-mod {
+    color: #eab308;
+    background: rgba(234, 179, 8, 0.25);
+    border: 2px solid #eab308;
+    box-shadow: 0 0 15px rgba(234, 179, 8, 0.6);
+}
+.marker-low {
+    color: #22c55e;
+    background: rgba(34, 197, 94, 0.25);
+    border: 2px solid #22c55e;
+    box-shadow: 0 0 12px rgba(34, 197, 94, 0.5);
+}
+
+/* Pulsing Outer Rings for Critical/High Hazards */
+.hazard-pulse-ring {
+    position: absolute;
+    inset: -14px;
+    border-radius: 50%;
+    border: 1.5px solid currentColor;
+    opacity: 0.6;
+    animation: ring-pulse 2s infinite ease-out;
+    pointer-events: none;
+}
+
+.marker-crit { color: var(--red); background: rgba(239,68,68,0.2); border: 2px solid var(--red); box-shadow: 0 0 15px var(--red); }
+.marker-high { color: var(--orange); background: rgba(249,115,22,0.2); border: 2px solid var(--orange); box-shadow: 0 0 15px var(--orange); }
+.marker-mod { color: var(--yellow); background: rgba(234,179,8,0.2); border: 2px solid var(--yellow); box-shadow: 0 0 15px var(--yellow); }
+.marker-low { color: var(--green); background: rgba(34,197,94,0.2); border: 2px solid var(--green); box-shadow: 0 0 15px var(--green); }
+
 @keyframes ring-pulse {
     0%   { transform: scale(0.6); opacity: 0.9; }
     100% { transform: scale(1.6); opacity: 0; }
