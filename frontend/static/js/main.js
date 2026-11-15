@@ -120,6 +120,8 @@ function routePage(page) {
         case 'resources': loadResourcesView(); break;
         case 'blood': loadBloodView(); break;
         case 'responses': loadResponsesView(); break;
+        case 'reports': loadReportsView(); break;
+        case 'requests': loadRequestsView(); break;
         default: loadPlaceholderView(page); break;
     }
 }
@@ -380,15 +382,32 @@ function loadRecentResponses() {
 }
 
 function initTacticalMap() {
-    // 1. Initialize the map (centered on a default location)
-    sentinelMap = L.map('tactical-map').setView([28.5355, 77.3910], 13);
+    const mapContainer = document.getElementById('tactical-map');
+    if (!mapContainer) return;
 
-    // 2. Use CartoDB Dark Matter (This is FREE and needs NO API KEY)
-        // Switch to Esri World Dark Gray (No API key required)
+    if (sentinelMap !== null) {
+        try { sentinelMap.remove(); } catch (e) {}
+        sentinelMap = null;
+    }
+
+    sentinelMap = L.map('tactical-map', {
+        zoomControl: false,
+        attributionControl: false
+    }).setView([28.5355, 77.3910], 11);
+
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
         maxZoom: 16
     }).addTo(sentinelMap);
+
+    L.control.zoom({ position: 'bottomright' }).addTo(sentinelMap);
+    mapMarkersLayer = L.layerGroup().addTo(sentinelMap);
+
+    setTimeout(function () {
+        if (sentinelMap) {
+            sentinelMap.invalidateSize();
+            loadMapIncidents();
+        }
+    }, 200);
 }
 
 function loadMapIncidents() {
@@ -408,10 +427,9 @@ function loadMapIncidents() {
                 var lat = parseFloat(inc.latitude);
                 var lng = parseFloat(inc.longitude);
 
-                // Fallback to Noida if coordinates are missing/zero
+                // Skip pins with no real coordinates (do NOT invent Noida)
                 if (isNaN(lat) || isNaN(lng) || lat === 0 || lng === 0) {
-                    lat = 28.5355;
-                    lng = 77.3910;
+                    return;
                 }
 
                 var pos = [lat, lng];
@@ -522,67 +540,106 @@ function loadIncidentsView() {
         });
 }
 
-function openRegisterIncidentModal() {
-    openModal(
-        'REGISTER NEW EMERGENCY INCIDENT',
-        `
-            <div class="form-grid">
-                <div class="full form-group">
-                    <label>INCIDENT TITLE</label>
-                    <input id="f-inc-title" placeholder="e.g. College Building Fire" />
-                </div>
-                <div class="form-group">
-                    <label>INCIDENT TYPE</label>
-                    <select id="f-inc-type">
-                        <option value="WILDFIRE">WILDFIRE</option>
-                        <option value="FIRE">FIRE</option>
-                        <option value="FLOOD">FLOOD</option>
-                        <option value="EARTHQUAKE">EARTHQUAKE</option>
-                        <option value="ACCIDENT">ACCIDENT</option>
-                        <option value="HAZMAT">HAZMAT</option>
-                        <option value="BUILDING_COLLAPSE">BUILDING COLLAPSE</option>
-                        <option value="OTHER">OTHER</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>SEVERITY</label>
-                    <select id="f-inc-sev">
-                        <option value="CRITICAL">CRITICAL</option>
-                        <option value="HIGH">HIGH</option>
-                        <option value="MODERATE" selected>MODERATE</option>
-                        <option value="LOW">LOW</option>
-                    </select>
-                </div>
-                <div class="full form-group">
-                    <label>LOCATION DESCRIPTION</label>
-                    <input id="f-inc-loc" placeholder="Sector / Landmark / Address" />
-                </div>
-                <div class="form-group">
-                    <label>LATITUDE (OPTIONAL)</label>
-                    <input id="f-inc-lat" placeholder="37.7749" />
-                </div>
-                <div class="form-group">
-                    <label>LONGITUDE (OPTIONAL)</label>
-                    <input id="f-inc-lng" placeholder="-122.4194" />
-                </div>
-            </div>
-        `,
-        // Inside your openRegisterIncidentModal function, replace the submit handler (async (root) => { ... }) with this:
-
         async (root) => {
             let lat = root.querySelector('#f-inc-lat').value.trim();
             let lng = root.querySelector('#f-inc-lng').value.trim();
             let locationDesc = root.querySelector('#f-inc-loc').value.trim();
-            
-            // AUTOMATIC GEOCODING: If Lat/Lng are empty, fetch from OpenStreetMap
+
+            // SMART GEOCODING — bias to India, try multiple query shapes
             if ((!lat || !lng) && locationDesc) {
-                try {
-                    const geoRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(locationDesc)}&limit=1`).then(r => r.json());
-                    if (geoRes && geoRes.length > 0) {
-                        lat = geoRes[0].lat;
-                        lng = geoRes[0].lon;
+                const tryQueries = [
+                    locationDesc + ', India',
+                    locationDesc,
+                    // If user typed a state/city keyword, query state center
+                    locationDesc.split(',')[0].trim() + ', India'
+                ];
+
+                for (const q of tryQueries) {
+                    try {
+                        const geoRes = await fetch(
+                            'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=in&q=' +
+                            encodeURIComponent(q),
+                            { headers: { 'Accept-Language': 'en', 'User-Agent': 'SENTINEL-Emergency-System/1.0' } }
+                        ).then(r => r.json());
+
+                        if (geoRes && geoRes.length > 0) {
+                            lat = geoRes[0].lat;
+                            lng = geoRes[0].lon;
+                            console.log('[SENTINEL] Geocoded', q, '→', lat, lng, geoRes[0].display_name);
+                            break;
+                        }
+                    } catch (e) {
+                        console.log('Geocode attempt failed for', q);
                     }
-                } catch (e) { console.log('Geocoding skipped/failed'); }
+                }
+            }
+
+            // Last-resort: known Indian state/city centroids (so Assam never becomes Noida)
+            if ((!lat || !lng) && locationDesc) {
+                const key = locationDesc.toLowerCase();
+                const centroids = {
+                    'assam': [26.2006, 92.9376],
+                    'guwahati': [26.1445, 91.7362],
+                    'bihar': [25.0961, 85.3131],
+                    'patna': [25.5941, 85.1376],
+                    'west bengal': [22.9868, 87.8550],
+                    'kolkata': [22.5726, 88.3639],
+                    'odisha': [20.9517, 85.0985],
+                    'odisha': [20.9517, 85.0985],
+                    'orissa': [20.9517, 85.0985],
+                    'kerala': [10.8505, 76.2711],
+                    'tamil nadu': [11.1271, 78.6569],
+                    'chennai': [13.0827, 80.2707],
+                    'maharashtra': [19.7515, 75.7139],
+                    'mumbai': [19.0760, 72.8777],
+                    'delhi': [28.6139, 77.2090],
+                    'new delhi': [28.6139, 77.2090],
+                    'uttar pradesh': [26.8467, 80.9462],
+                    'lucknow': [26.8467, 80.9462],
+                    'noida': [28.5355, 77.3910],
+                    'dadri': [28.5529, 77.5542],
+                    'greater noida': [28.4744, 77.5040],
+                    'ghaziabad': [28.6692, 77.4538],
+                    'gurugram': [28.4595, 77.0266],
+                    'gurgaon': [28.4595, 77.0266],
+                    'rajasthan': [27.0238, 74.2179],
+                    'jaipur': [26.9124, 75.7873],
+                    'gujarat': [22.2587, 71.1924],
+                    'ahmedabad': [23.0225, 72.5714],
+                    'punjab': [31.1471, 75.3412],
+                    'chandigarh': [30.7333, 76.7794],
+                    'haryana': [29.0588, 76.0856],
+                    'himachal': [31.1048, 77.1734],
+                    'uttarakhand': [30.0668, 79.0193],
+                    'jharkhand': [23.6102, 85.2799],
+                    'chhattisgarh': [21.2787, 81.8661],
+                    'madhya pradesh': [22.9734, 78.6569],
+                    'telangana': [18.1124, 79.0193],
+                    'hyderabad': [17.3850, 78.4867],
+                    'andhra pradesh': [15.9129, 79.7400],
+                    'karnataka': [15.3173, 75.7139],
+                    'bengaluru': [12.9716, 77.5946],
+                    'bangalore': [12.9716, 77.5946],
+                    'goa': [15.2993, 74.1240],
+                    'sikkim': [27.5330, 88.5122],
+                    'meghalaya': [25.4670, 91.3662],
+                    'manipur': [24.6637, 93.9063],
+                    'mizoram': [23.1645, 92.9376],
+                    'nagaland': [26.1584, 94.5624],
+                    'tripura': [23.9408, 91.9882],
+                    'arunachal': [28.2180, 94.7278],
+                    'jammu': [32.7266, 74.8570],
+                    'kashmir': [33.7782, 76.5762],
+                    'ladakh': [34.1526, 77.5770]
+                };
+                for (const name in centroids) {
+                    if (key.indexOf(name) !== -1) {
+                        lat = String(centroids[name][0]);
+                        lng = String(centroids[name][1]);
+                        console.log('[SENTINEL] Centroid fallback for', name, lat, lng);
+                        break;
+                    }
+                }
             }
 
             const payload = {
@@ -591,12 +648,18 @@ function openRegisterIncidentModal() {
                 severity: root.querySelector('#f-inc-sev').value,
                 location_desc: locationDesc,
                 latitude: lat || null,
-                longitude: lng || null,
+                longitude: lng || null
             };
-            
+
             if (!payload.title || !payload.location_desc) {
                 throw new Error('Title and Location Description are required.');
             }
+
+            // Warn operator if still no coordinates
+            if (!payload.latitude || !payload.longitude) {
+                console.warn('[SENTINEL] No coordinates resolved for:', locationDesc);
+            }
+
             const res = await fetch('/api/incidents', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -605,9 +668,8 @@ function openRegisterIncidentModal() {
 
             if (res.status !== 'success') throw new Error(res.message || 'Registration failed');
             loadIncidentsView();
+            if (typeof loadMapIncidents === 'function') loadMapIncidents();
         }
-    );
-}
 
 /* 2. Victims Module */
 function loadVictimsView() {
@@ -752,6 +814,7 @@ function openAdmitVictimModal(victimId) {
 }
 
 /* 3. Ambulances Module */
+/* 3. Ambulances Module */
 function loadAmbulancesView() {
     fetch('/api/ambulances')
         .then(r => r.json())
@@ -761,6 +824,7 @@ function loadAmbulancesView() {
             content.innerHTML = `
                 <div class="module-toolbar">
                     <span class="toolbar-title">AMBULANCE FLEET [${data.length}]</span>
+                    <button class="btn-cyan" id="btn-add-ambulance">+ ADD AMBULANCE</button>
                 </div>
                 <div class="panel">
                     <div class="table-wrap">
@@ -771,24 +835,83 @@ function loadAmbulancesView() {
                                 </tr>
                             </thead>
                             <tbody>
-                                ${data.length ? data.map(a => `
+                                ${data.length ? data.map(a => {
+                                    const st = (a.status || '').toUpperCase();
+                                    let action = '—';
+                                    if (st === 'AVAILABLE') {
+                                        action = `<button class="btn-cyan btn-sm" onclick="openDispatchAmbulanceModal(${a.ambulance_id})">DISPATCH</button>`;
+                                    } else if (st === 'DISPATCHED' || st === 'EN_ROUTE' || st === 'ON_SCENE') {
+                                        action = `<button class="btn-ghost btn-sm" onclick="recallAmbulance(${a.ambulance_id})">RECALL</button>`;
+                                    }
+                                    return `
                                     <tr>
                                         <td class="row-id">AMB-${esc(a.ambulance_id)}</td>
                                         <td><strong>${esc(a.vehicle_number)}</strong></td>
-                                        <td>${esc(a.type)}</td>
-                                        <td><span class="sev-tag ${a.status === 'AVAILABLE' ? 'low' : a.status === 'DISPATCHED' ? 'high' : 'critical'}">${esc(a.status)}</span></td>
+                                        <td>${esc(a.type || a.ambulance_type || '—')}</td>
+                                        <td><span class="sev-tag ${st === 'AVAILABLE' ? 'low' : st === 'DISPATCHED' ? 'high' : 'critical'}">${esc(st)}</span></td>
                                         <td>${esc(a.current_location || 'Base Station')}</td>
-                                        <td>
-                                            ${a.status === 'AVAILABLE' ? `<button class="btn-cyan btn-sm" onclick="openDispatchAmbulanceModal(${a.ambulance_id})">DISPATCH</button>` : '—'}
-                                        </td>
-                                    </tr>
-                                `).join('') : '<tr class="empty-row"><td colspan="6">NO AMBULANCES FOUND</td></tr>'}
+                                        <td>${action}</td>
+                                    </tr>`;
+                                }).join('') : '<tr class="empty-row"><td colspan="6">NO AMBULANCES FOUND</td></tr>'}
                             </tbody>
                         </table>
                     </div>
                 </div>
             `;
+            document.getElementById('btn-add-ambulance').onclick = openAddAmbulanceModal;
         });
+}
+
+function openAddAmbulanceModal() {
+    openModal(
+        'REGISTER NEW AMBULANCE UNIT',
+        `
+            <div class="form-grid">
+                <div class="full form-group">
+                    <label>VEHICLE NUMBER</label>
+                    <input id="f-amb-num" placeholder="e.g. AMB-109" />
+                </div>
+                <div class="form-group">
+                    <label>TYPE</label>
+                    <select id="f-amb-type">
+                        <option value="ALS">ALS</option>
+                        <option value="BLS">BLS</option>
+                        <option value="NEONATAL">NEONATAL</option>
+                        <option value="PATIENT TRANSPORT">PATIENT TRANSPORT</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>BASE LOCATION</label>
+                    <input id="f-amb-loc" placeholder="Station Alpha" value="Base Station" />
+                </div>
+            </div>
+        `,
+        async (root) => {
+            const payload = {
+                vehicle_number: root.querySelector('#f-amb-num').value.trim(),
+                type: root.querySelector('#f-amb-type').value,
+                current_location: root.querySelector('#f-amb-loc').value.trim() || 'Base Station'
+            };
+            if (!payload.vehicle_number) throw new Error('Vehicle number required');
+            const res = await fetch('/api/ambulances', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(r => r.json());
+            if (res.status !== 'success') throw new Error(res.message || 'Failed to add ambulance');
+            loadAmbulancesView();
+        }
+    );
+}
+
+async function recallAmbulance(ambulanceId) {
+    if (!confirm('Recall AMB-' + ambulanceId + ' back to base?')) return;
+    const res = await fetch('/api/ambulances/' + ambulanceId + '/recall', { method: 'PUT' }).then(r => r.json());
+    if (res.status !== 'success') {
+        alert(res.message || 'Recall failed');
+        return;
+    }
+    loadAmbulancesView();
 }
 
 function openDispatchAmbulanceModal(ambulanceId) {
@@ -824,6 +947,7 @@ function openDispatchAmbulanceModal(ambulanceId) {
 }
 
 /* 4. Rescue Teams Module */
+/* 4. Rescue Teams Module */
 function loadTeamsView() {
     fetch('/api/teams')
         .then(r => r.json())
@@ -833,6 +957,7 @@ function loadTeamsView() {
             content.innerHTML = `
                 <div class="module-toolbar">
                     <span class="toolbar-title">RESCUE TEAMS DIRECTORY [${data.length}]</span>
+                    <button class="btn-cyan" id="btn-add-team">+ ADD RESCUE TEAM</button>
                 </div>
                 <div class="panel">
                     <div class="table-wrap">
@@ -843,24 +968,87 @@ function loadTeamsView() {
                                 </tr>
                             </thead>
                             <tbody>
-                                ${data.length ? data.map(t => `
+                                ${data.length ? data.map(t => {
+                                    const st = (t.status || '').toUpperCase();
+                                    const members = t.members_count != null ? t.members_count : (t.members || '—');
+                                    const ttype = t.team_type || t.type || '—';
+                                    let action = '—';
+                                    if (st === 'AVAILABLE' || st === 'STANDBY') {
+                                        action = `<button class="btn-cyan btn-sm" onclick="openDispatchTeamModal(${t.team_id})">DEPLOY</button>`;
+                                    } else if (st === 'DEPLOYED' || st === 'RESTING') {
+                                        action = `<button class="btn-ghost btn-sm" onclick="recallTeam(${t.team_id})">RECALL</button>`;
+                                    }
+                                    return `
                                     <tr>
                                         <td class="row-id">TM-${esc(t.team_id)}</td>
-                                        <td><strong>${esc(t.team_name)}</strong></td>
-                                        <td>${esc(t.team_type)}</td>
-                                        <td>${esc(t.members_count)} Personnel</td>
-                                        <td><span class="sev-tag ${t.status === 'AVAILABLE' ? 'low' : 'high'}">${esc(t.status)}</span></td>
-                                        <td>
-                                            ${t.status === 'AVAILABLE' ? `<button class="btn-cyan btn-sm" onclick="openDispatchTeamModal(${t.team_id})">DEPLOY</button>` : '—'}
-                                        </td>
-                                    </tr>
-                                `).join('') : '<tr class="empty-row"><td colspan="6">NO TEAMS FOUND</td></tr>'}
+                                        <td><strong>${esc(t.team_name || t.name)}</strong></td>
+                                        <td>${esc(ttype)}</td>
+                                        <td>${esc(members)} Personnel</td>
+                                        <td><span class="sev-tag ${st === 'AVAILABLE' ? 'low' : st === 'DEPLOYED' ? 'high' : 'moderate'}">${esc(st)}</span></td>
+                                        <td>${action}</td>
+                                    </tr>`;
+                                }).join('') : '<tr class="empty-row"><td colspan="6">NO TEAMS FOUND</td></tr>'}
                             </tbody>
                         </table>
                     </div>
                 </div>
             `;
+            document.getElementById('btn-add-team').onclick = openAddTeamModal;
         });
+}
+
+function openAddTeamModal() {
+    openModal(
+        'REGISTER NEW RESCUE TEAM',
+        `
+            <div class="form-grid">
+                <div class="full form-group">
+                    <label>TEAM NAME</label>
+                    <input id="f-team-name" placeholder="e.g. Echo Medical Squad" />
+                </div>
+                <div class="form-group">
+                    <label>TEAM TYPE</label>
+                    <select id="f-team-type">
+                        <option>Fire</option>
+                        <option>Hazmat</option>
+                        <option>Medical</option>
+                        <option>Search & Rescue</option>
+                        <option>General</option>
+                        <option>Water Rescue</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>MEMBERS COUNT</label>
+                    <input id="f-team-members" type="number" min="1" value="6" />
+                </div>
+            </div>
+        `,
+        async (root) => {
+            const payload = {
+                team_name: root.querySelector('#f-team-name').value.trim(),
+                team_type: root.querySelector('#f-team-type').value,
+                members_count: Number(root.querySelector('#f-team-members').value) || 5
+            };
+            if (!payload.team_name) throw new Error('Team name required');
+            const res = await fetch('/api/teams', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(r => r.json());
+            if (res.status !== 'success') throw new Error(res.message || 'Failed to add team');
+            loadTeamsView();
+        }
+    );
+}
+
+async function recallTeam(teamId) {
+    if (!confirm('Recall TM-' + teamId + ' back to AVAILABLE?')) return;
+    const res = await fetch('/api/teams/' + teamId + '/recall', { method: 'PUT' }).then(r => r.json());
+    if (res.status !== 'success') {
+        alert(res.message || 'Recall failed');
+        return;
+    }
+    loadTeamsView();
 }
 
 function openDispatchTeamModal(teamId) {
@@ -896,6 +1084,7 @@ function openDispatchTeamModal(teamId) {
 }
 
 /* 5. Hospitals Module */
+/* 5. Hospitals Module */
 function loadHospitalsView() {
     fetch('/api/hospitals')
         .then(r => r.json())
@@ -905,35 +1094,93 @@ function loadHospitalsView() {
             content.innerHTML = `
                 <div class="module-toolbar">
                     <span class="toolbar-title">HOSPITAL CAPACITY DIRECTORY [${data.length}]</span>
+                    <button class="btn-cyan" id="btn-add-hospital">+ ADD HOSPITAL</button>
                 </div>
                 <div class="panel">
                     <div class="table-wrap">
                         <table class="data-table">
                             <thead>
                                 <tr>
-                                    <th>ID</th><th>HOSPITAL NAME</th><th>LOCATION</th><th>AVAILABLE BEDS</th><th>OCCUPIED BEDS</th><th>TOTAL BEDS</th><th>OCCUPANCY</th>
+                                    <th>ID</th><th>HOSPITAL NAME</th><th>LOCATION</th>
+                                    <th>AVAILABLE BEDS</th><th>OCCUPIED BEDS</th><th>TOTAL BEDS</th><th>OCCUPANCY</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                ${data.length ? data.map(h => `
+                                ${data.length ? data.map(h => {
+                                    const total = Number(h.total_beds) || 0;
+                                    const occ = h.occupied_beds != null ? Number(h.occupied_beds)
+                                              : Math.max(total - Number(h.available_beds || 0), 0);
+                                    const avail = h.available_beds != null ? Number(h.available_beds)
+                                               : Math.max(total - occ, 0);
+                                    let rate = h.occupancy_rate;
+                                    if (rate == null || rate === '' || Number(rate) === 0 && occ > 0) {
+                                        rate = total ? Math.round((occ / total) * 100) : 0;
+                                    }
+                                    const rateNum = Number(rate) || 0;
+                                    const rateColor = rateNum >= 90 ? 'var(--red)' : rateNum >= 70 ? 'var(--orange)' : 'var(--green)';
+                                    return `
                                     <tr>
                                         <td class="row-id">HOS-${esc(h.hospital_id)}</td>
                                         <td><strong>${esc(h.name)}</strong></td>
                                         <td>${esc(h.location)}</td>
-                                        <td style="color:var(--green)"><strong>${esc(h.available_beds)}</strong></td>
-                                        <td style="color:var(--orange)">${esc(h.occupied_beds)}</td>
-                                        <td>${esc(h.total_beds)}</td>
-                                        <td>${esc(h.occupancy_rate || 0)}%</td>
-                                    </tr>
-                                `).join('') : '<tr class="empty-row"><td colspan="7">NO HOSPITALS FOUND</td></tr>'}
+                                        <td style="color:var(--green)"><strong>${esc(avail)}</strong></td>
+                                        <td style="color:var(--orange)">${esc(occ)}</td>
+                                        <td>${esc(total)}</td>
+                                        <td style="color:${rateColor}; font-weight:bold;">${esc(rateNum)}%</td>
+                                    </tr>`;
+                                }).join('') : '<tr class="empty-row"><td colspan="7">NO HOSPITALS FOUND</td></tr>'}
                             </tbody>
                         </table>
                     </div>
                 </div>
             `;
+            document.getElementById('btn-add-hospital').onclick = openAddHospitalModal;
         });
 }
 
+function openAddHospitalModal() {
+    openModal(
+        'REGISTER NEW HOSPITAL',
+        `
+            <div class="form-grid">
+                <div class="full form-group">
+                    <label>HOSPITAL NAME</label>
+                    <input id="f-hos-name" placeholder="e.g. Noida Trauma Center" />
+                </div>
+                <div class="full form-group">
+                    <label>LOCATION</label>
+                    <input id="f-hos-loc" placeholder="Sector / City" />
+                </div>
+                <div class="form-group">
+                    <label>TOTAL BEDS</label>
+                    <input id="f-hos-total" type="number" min="1" value="100" />
+                </div>
+                <div class="form-group">
+                    <label>OCCUPIED BEDS</label>
+                    <input id="f-hos-occ" type="number" min="0" value="0" />
+                </div>
+            </div>
+        `,
+        async (root) => {
+            const payload = {
+                name: root.querySelector('#f-hos-name').value.trim(),
+                location: root.querySelector('#f-hos-loc').value.trim(),
+                total_beds: Number(root.querySelector('#f-hos-total').value),
+                occupied_beds: Number(root.querySelector('#f-hos-occ').value) || 0
+            };
+            if (!payload.name || !payload.total_beds) throw new Error('Name and total beds required');
+            const res = await fetch('/api/hospitals', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(r => r.json());
+            if (res.status !== 'success') throw new Error(res.message || 'Failed to add hospital');
+            loadHospitalsView();
+        }
+    );
+}
+
+/* 6. Medical Resources Module */
 /* 6. Medical Resources Module */
 function loadResourcesView() {
     fetch('/api/resources')
@@ -944,7 +1191,10 @@ function loadResourcesView() {
             content.innerHTML = `
                 <div class="module-toolbar">
                     <span class="toolbar-title">MEDICAL RESOURCES INVENTORY [${data.length}]</span>
-                    <button class="btn-cyan" id="btn-open-alloc-resource">ALLOCATE RESOURCE</button>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn-ghost" id="btn-add-resource">+ ADD RESOURCE</button>
+                        <button class="btn-cyan" id="btn-open-alloc-resource">ALLOCATE RESOURCE</button>
+                    </div>
                 </div>
                 <div class="panel">
                     <div class="table-wrap">
@@ -955,23 +1205,72 @@ function loadResourcesView() {
                                 </tr>
                             </thead>
                             <tbody>
-                                ${data.length ? data.map(resItem => `
+                                ${data.length ? data.map(resItem => {
+                                    const id = resItem.resource_id || resItem.id || '—';
+                                    const name = resItem.resource_name || resItem.name || '—';
+                                    const type = resItem.resource_type || resItem.type || '—';
+                                    const qty = resItem.quantity_available != null ? resItem.quantity_available
+                                              : (resItem.quantity != null ? resItem.quantity : '—');
+                                    const unit = resItem.unit || 'Units';
+                                    return `
                                     <tr>
-                                        <td class="row-id">RES-${esc(resItem.resource_id)}</td>
-                                        <td><strong>${esc(resItem.resource_name)}</strong></td>
-                                        <td>${esc(resItem.resource_type)}</td>
-                                        <td><strong style="color:var(--cyan)">${esc(resItem.quantity_available)}</strong></td>
-                                        <td>${esc(resItem.unit)}</td>
-                                    </tr>
-                                `).join('') : '<tr class="empty-row"><td colspan="5">NO RESOURCES IN INVENTORY</td></tr>'}
+                                        <td class="row-id">RES-${esc(id)}</td>
+                                        <td><strong>${esc(name)}</strong></td>
+                                        <td>${esc(type)}</td>
+                                        <td><strong style="color:var(--cyan)">${esc(qty)}</strong></td>
+                                        <td>${esc(unit)}</td>
+                                    </tr>`;
+                                }).join('') : '<tr class="empty-row"><td colspan="5">NO RESOURCES IN INVENTORY</td></tr>'}
                             </tbody>
                         </table>
                     </div>
                 </div>
             `;
-
             document.getElementById('btn-open-alloc-resource').onclick = openAllocateResourceModal;
+            document.getElementById('btn-add-resource').onclick = openAddResourceModal;
         });
+}
+
+function openAddResourceModal() {
+    openModal(
+        'ADD MEDICAL RESOURCE',
+        `
+            <div class="form-grid">
+                <div class="full form-group">
+                    <label>RESOURCE NAME</label>
+                    <input id="f-res-name" placeholder="e.g. Trauma Kits" />
+                </div>
+                <div class="form-group">
+                    <label>TYPE</label>
+                    <input id="f-res-type" placeholder="Emergency Care" value="General" />
+                </div>
+                <div class="form-group">
+                    <label>UNIT</label>
+                    <input id="f-res-unit" placeholder="Units" value="Units" />
+                </div>
+                <div class="full form-group">
+                    <label>AVAILABLE QUANTITY</label>
+                    <input id="f-res-qty" type="number" min="0" value="10" />
+                </div>
+            </div>
+        `,
+        async (root) => {
+            const payload = {
+                resource_name: root.querySelector('#f-res-name').value.trim(),
+                resource_type: root.querySelector('#f-res-type').value.trim() || 'General',
+                unit: root.querySelector('#f-res-unit').value.trim() || 'Units',
+                quantity_available: Number(root.querySelector('#f-res-qty').value) || 0
+            };
+            if (!payload.resource_name) throw new Error('Resource name required');
+            const res = await fetch('/api/resources', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(r => r.json());
+            if (res.status !== 'success') throw new Error(res.message || 'Failed to add resource');
+            loadResourcesView();
+        }
+    );
 }
 
 function openAllocateResourceModal() {
@@ -1130,16 +1429,145 @@ function loadResponsesView() {
         });
 }
 
-function loadPlaceholderView(name) {
-    const content = document.querySelector('.content');
-    content.innerHTML = `
-        <div class="panel">
-            <div class="panel-head">
-                <span class="panel-title-text">${esc(name.toUpperCase())} AUDIT & REPORTS</span>
+/* 9. Reports Module */
+function loadReportsView() {
+    Promise.all([
+        fetch('/api/dashboard/stats').then(r => r.json()),
+        fetch('/api/dashboard/recent-responses').then(r => r.json()),
+        fetch('/api/incidents').then(r => r.json())
+    ]).then(([statsRes, respRes, incRes]) => {
+        const s = (statsRes.stats || {});
+        const responses = (respRes.data || []);
+        const incidents = (incRes.data || []);
+        const content = document.querySelector('.content');
+        content.innerHTML = `
+            <div class="module-toolbar">
+                <span class="toolbar-title">OPS REPORTS & AUDIT</span>
             </div>
-            <div style="padding: 2.5rem; text-align: center; color: var(--text-2); font-family: var(--mono); letter-spacing: 1px;">
-                TELEMETRY MODULE READY FOR OPS REPORTING.
+            <div class="panel" style="margin-bottom:1rem; padding:1rem;">
+                <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; font-family:var(--mono);">
+                    <div><div style="color:var(--text-2);font-size:0.7rem;">ACTIVE INCIDENTS</div><div style="color:var(--cyan);font-size:1.4rem;font-weight:bold;">${esc(s.active_incidents ?? incidents.length)}</div></div>
+                    <div><div style="color:var(--text-2);font-size:0.7rem;">VICTIMS</div><div style="color:var(--cyan);font-size:1.4rem;font-weight:bold;">${esc(s.total_victims ?? '—')}</div></div>
+                    <div><div style="color:var(--text-2);font-size:0.7rem;">AVAILABLE AMBULANCES</div><div style="color:var(--cyan);font-size:1.4rem;font-weight:bold;">${esc(s.available_ambulances ?? '—')}</div></div>
+                    <div><div style="color:var(--text-2);font-size:0.7rem;">AVAILABLE BEDS</div><div style="color:var(--cyan);font-size:1.4rem;font-weight:bold;">${esc(s.available_beds ?? '—')}</div></div>
+                    <div><div style="color:var(--text-2);font-size:0.7rem;">ALERTS (24h)</div><div style="color:var(--cyan);font-size:1.4rem;font-weight:bold;">${esc(s.recent_alerts ?? '—')}</div></div>
+                </div>
             </div>
-        </div>
-    `;
+            <div class="panel">
+                <div class="table-wrap">
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>RESP ID</th><th>INCIDENT</th><th>UNIT</th><th>RESPONSE TIME</th></tr>
+                        </thead>
+                        <tbody>
+                            ${responses.length ? responses.map(r => `
+                                <tr>
+                                    <td class="row-id">R-${esc(r.resp_id)}</td>
+                                    <td>INC-${esc(r.incident_id)}</td>
+                                    <td><strong>${esc(r.unit)}</strong></td>
+                                    <td>${esc(r.response_minutes != null ? r.response_minutes + ' min' : '—')}</td>
+                                </tr>
+                            `).join('') : '<tr class="empty-row"><td colspan="4">NO RESPONSE AUDIT RECORDS YET — dispatch units to generate logs</td></tr>'}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }).catch(err => {
+        console.error(err);
+        loadPlaceholderView('reports');
+    });
+}
+
+/* 10. Emergency Requests Module */
+function loadRequestsView() {
+    fetch('/api/alerts')
+        .then(r => r.json())
+        .then(res => {
+            const data = res.data || [];
+            const content = document.querySelector('.content');
+            content.innerHTML = `
+                <div class="module-toolbar">
+                    <span class="toolbar-title">EMERGENCY REQUESTS & ALERTS [${data.length}]</span>
+                    <button class="btn-cyan" id="btn-new-request">+ NEW REQUEST ALERT</button>
+                </div>
+                <div class="panel">
+                    <div class="table-wrap">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th><th>LEVEL</th><th>MESSAGE</th><th>TIME</th><th>STATUS</th><th>ACTION</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.length ? data.map(a => `
+                                    <tr>
+                                        <td class="row-id">ALR-${esc(a.alert_id)}</td>
+                                        <td><span class="sev-tag ${(a.alert_level || 'info').toLowerCase()}">${esc(a.alert_level)}</span></td>
+                                        <td>${esc(a.message)}</td>
+                                        <td>${esc(fmtTime(a.alert_time))}</td>
+                                        <td>${a.is_acknowledged ? '<span style="color:var(--green)">ACK</span>' : '<span style="color:var(--orange)">OPEN</span>'}</td>
+                                        <td>
+                                            ${!a.is_acknowledged ? `<button class="btn-cyan btn-sm" onclick="ackAlert(${a.alert_id})">ACK</button>` : '—'}
+                                        </td>
+                                    </tr>
+                                `).join('') : '<tr class="empty-row"><td colspan="6">NO OPEN REQUESTS</td></tr>'}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            document.getElementById('btn-new-request').onclick = openNewRequestModal;
+        });
+}
+
+function openNewRequestModal() {
+    openModal(
+        'CREATE EMERGENCY REQUEST ALERT',
+        `
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>ALERT LEVEL</label>
+                    <select id="f-req-level">
+                        <option value="CRITICAL">CRITICAL</option>
+                        <option value="HIGH">HIGH</option>
+                        <option value="INFO" selected>INFO</option>
+                    </select>
+                </div>
+                <div class="full form-group">
+                    <label>REQUEST / MESSAGE</label>
+                    <input id="f-req-msg" placeholder="e.g. Need 2 ALS ambulances at Sector 18" />
+                </div>
+            </div>
+        `,
+        async (root) => {
+            const level = root.querySelector('#f-req-level').value;
+            const message = root.querySelector('#f-req-msg').value.trim();
+            if (!message) throw new Error('Message required');
+
+            // Use incidents create-adjacent path: insert via a lightweight alerts POST if present,
+            // otherwise fall back to acknowledging flow after manual SQL-less insert attempt.
+            let res = await fetch('/api/alerts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ alert_level: level, message })
+            }).then(r => r.json()).catch(() => ({ status: 'error' }));
+
+            if (res.status !== 'success') {
+                // Fallback: create a LOW incident-style note through existing incident API is overkill;
+                // show clear instruction if backend route missing.
+                throw new Error(res.message || 'Alert POST not available — add POST /api/alerts in api.py');
+            }
+            loadRequestsView();
+        }
+    );
+}
+
+async function ackAlert(alertId) {
+    const res = await fetch('/api/alerts/' + alertId + '/ack', { method: 'PUT' }).then(r => r.json());
+    if (res.status !== 'success') {
+        alert(res.message || 'Ack failed');
+        return;
+    }
+    loadRequestsView();
 }

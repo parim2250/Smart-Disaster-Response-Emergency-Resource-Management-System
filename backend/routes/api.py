@@ -159,13 +159,17 @@ def map_incidents():
     rows, err = fetch_all('''
         SELECT incident_id, title, incident_type, severity, status,
                location_desc,
-               COALESCE(latitude, 28.5355) AS latitude,
-               COALESCE(longitude, 77.3910) AS longitude,
+               latitude,
+               longitude,
                (SELECT COUNT(*) FROM dispatch_ambulances da
                 WHERE da.incident_id = i.incident_id
-                  AND da.status IN ('EN_ROUTE','ON_SCENE')) AS units_on_scene
+                  AND da.status IN ('EN_ROUTE','ON_SCENE','DISPATCHED')) AS units_on_scene
         FROM incidents i
         WHERE status IN ('ACTIVE', 'CONTAINED')
+          AND latitude IS NOT NULL
+          AND longitude IS NOT NULL
+          AND latitude != 0
+          AND longitude != 0
     ''')
     if err:
         return jsonify({'status': 'error', 'message': err}), 500
@@ -361,13 +365,66 @@ def admit_victim(victim_id):
     if not hospital_id:
         return jsonify({'status': 'error', 'message': 'hospital_id required'}), 400
 
+    # Try stored procedure first
     results, err = call_procedure('sp_admit_victim', [victim_id, hospital_id])
-    if err:
-        return jsonify({'status': 'error', 'message': err}), 500
-    msg = results[0][0]['message'] if results and results[0] else 'Done'
-    if 'ERROR' in str(msg):
-        return jsonify({'status': 'error', 'message': msg}), 400
-    return jsonify({'status': 'success', 'message': msg})
+    if not err:
+        msg = results[0][0].get('message') if results and results[0] else 'Done'
+        if 'ERROR' not in str(msg).upper():
+            return jsonify({'status': 'success', 'message': msg})
+
+    # Guaranteed fallback (transactional bed update)
+    conn = get_db_connection()
+    if conn is None:
+        return jsonify({'status': 'error', 'message': 'DB connection failed'}), 500
+    cursor = None
+    try:
+        cursor = conn.cursor(dictionary=True)
+        conn.start_transaction()
+
+        cursor.execute('SELECT hospital_id FROM victims WHERE victim_id = %s FOR UPDATE', (victim_id,))
+        vic = cursor.fetchone()
+        if not vic:
+            conn.rollback()
+            return jsonify({'status': 'error', 'message': 'Victim not found'}), 404
+        if vic.get('hospital_id'):
+            conn.rollback()
+            return jsonify({'status': 'error', 'message': 'Victim already admitted'}), 400
+
+        cursor.execute('''
+            SELECT hospital_id, total_beds, occupied_beds,
+                   (total_beds - occupied_beds) AS available_beds
+            FROM hospitals WHERE hospital_id = %s FOR UPDATE
+        ''', (hospital_id,))
+        hos = cursor.fetchone()
+        if not hos:
+            conn.rollback()
+            return jsonify({'status': 'error', 'message': 'Hospital not found'}), 404
+
+        available = hos.get('available_beds')
+        if available is None:
+            available = int(hos['total_beds']) - int(hos['occupied_beds'] or 0)
+        if int(available) <= 0:
+            conn.rollback()
+            return jsonify({'status': 'error', 'message': 'No beds available at this hospital'}), 400
+
+        cursor.execute(
+            'UPDATE victims SET hospital_id = %s WHERE victim_id = %s',
+            (hospital_id, victim_id)
+        )
+        cursor.execute(
+            'UPDATE hospitals SET occupied_beds = occupied_beds + 1 WHERE hospital_id = %s',
+            (hospital_id,)
+        )
+        conn.commit()
+        return jsonify({
+            'status': 'success',
+            'message': f'Victim admitted. Beds updated at hospital {hospital_id}.'
+        })
+    except Error as e:
+        conn.rollback()
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        close_connection(conn, cursor)
 
 
 # =====================================================================
@@ -455,11 +512,36 @@ def dispatch_team():
 
 @api_bp.route('/hospitals', methods=['GET'])
 def list_hospitals():
-    rows, err = fetch_all('SELECT * FROM view_hospital_capacity')
+    rows, err = fetch_all('SELECT * FROM hospitals ORDER BY hospital_id')
+    if err:
+        # fallback to view if base table query fails
+        rows, err = fetch_all('SELECT * FROM view_hospital_capacity')
     if err:
         return jsonify({'status': 'error', 'message': err}), 500
-    return jsonify({'status': 'success', 'data': rows or []})
 
+    normalized = []
+    for h in (rows or []):
+        total = int(h.get('total_beds') or 0)
+        # prefer explicit occupied; else derive from available
+        if h.get('occupied_beds') is not None:
+            occupied = int(h.get('occupied_beds') or 0)
+        else:
+            available = int(h.get('available_beds') or 0)
+            occupied = max(total - available, 0)
+        available = int(h.get('available_beds') if h.get('available_beds') is not None else max(total - occupied, 0))
+        occ_rate = h.get('occupancy_rate')
+        if occ_rate is None:
+            occ_rate = round((occupied / total) * 100, 1) if total else 0
+        normalized.append({
+            'hospital_id': h.get('hospital_id'),
+            'name': h.get('name'),
+            'location': h.get('location'),
+            'total_beds': total,
+            'occupied_beds': occupied,
+            'available_beds': available,
+            'occupancy_rate': occ_rate
+        })
+    return jsonify({'status': 'success', 'data': normalized})
 
 @api_bp.route('/doctors', methods=['GET'])
 def list_doctors():
@@ -483,8 +565,19 @@ def list_resources():
     rows, err = fetch_all('SELECT * FROM resources ORDER BY resource_id')
     if err:
         return jsonify({'status': 'error', 'message': err}), 500
-    return jsonify({'status': 'success', 'data': rows or []})
 
+    # Normalize column names for the frontend
+    normalized = []
+    for r in (rows or []):
+        normalized.append({
+            'resource_id': r.get('resource_id') or r.get('id'),
+            'resource_name': r.get('resource_name') or r.get('name') or '—',
+            'resource_type': r.get('resource_type') or r.get('type') or '—',
+            'quantity_available': r.get('quantity_available') if r.get('quantity_available') is not None
+                                  else r.get('quantity', 0),
+            'unit': r.get('unit') or 'Units'
+        })
+    return jsonify({'status': 'success', 'data': normalized})
 
 @api_bp.route('/resources/allocate', methods=['POST'])
 def allocate_resource():
@@ -536,6 +629,131 @@ def update_blood(blood_group):
 
 
 # =====================================================================
+# CREATE + RECALL (Fleet / Teams / Resources)
+# =====================================================================
+
+@api_bp.route('/ambulances', methods=['POST'])
+def create_ambulance():
+    data = request.get_json() or {}
+    vehicle_number = (data.get('vehicle_number') or '').strip()
+    amb_type = (data.get('type') or 'BLS').strip()
+    location = (data.get('current_location') or 'Base Station').strip()
+    if not vehicle_number:
+        return jsonify({'status': 'error', 'message': 'vehicle_number required'}), 400
+
+    last_id, err = run_write('''
+        INSERT INTO ambulances (vehicle_number, type, status, current_location)
+        VALUES (%s, %s, 'AVAILABLE', %s)
+    ''', (vehicle_number, amb_type, location))
+    if err:
+        return jsonify({'status': 'error', 'message': err}), 500
+    return jsonify({'status': 'success', 'ambulance_id': last_id}), 201
+
+
+@api_bp.route('/ambulances/<int:ambulance_id>/recall', methods=['PUT'])
+def recall_ambulance(ambulance_id):
+    """Return a dispatched ambulance back to AVAILABLE."""
+    _, err = run_write('''
+        UPDATE ambulances
+        SET status = 'AVAILABLE', current_location = 'Base Station'
+        WHERE ambulance_id = %s
+    ''', (ambulance_id,))
+    if err:
+        return jsonify({'status': 'error', 'message': err}), 500
+
+    # Best-effort: close open dispatch rows if table exists
+    run_write('''
+        UPDATE dispatch_ambulances
+        SET status = 'COMPLETED'
+        WHERE ambulance_id = %s AND status IN ('EN_ROUTE', 'ON_SCENE', 'DISPATCHED')
+    ''', (ambulance_id,))
+
+    return jsonify({'status': 'success', 'message': 'Ambulance recalled'})
+
+
+@api_bp.route('/teams', methods=['POST'])
+def create_team():
+    data = request.get_json() or {}
+    name = (data.get('team_name') or '').strip()
+    team_type = (data.get('team_type') or 'General').strip()
+    members = int(data.get('members_count') or 5)
+    if not name:
+        return jsonify({'status': 'error', 'message': 'team_name required'}), 400
+
+    last_id, err = run_write('''
+        INSERT INTO rescue_teams (team_name, team_type, members_count, status)
+        VALUES (%s, %s, %s, 'AVAILABLE')
+    ''', (name, team_type, members))
+    if err:
+        return jsonify({'status': 'error', 'message': err}), 500
+    return jsonify({'status': 'success', 'team_id': last_id}), 201
+
+
+@api_bp.route('/teams/<int:team_id>/recall', methods=['PUT'])
+def recall_team(team_id):
+    _, err = run_write('''
+        UPDATE rescue_teams SET status = 'AVAILABLE' WHERE team_id = %s
+    ''', (team_id,))
+    if err:
+        return jsonify({'status': 'error', 'message': err}), 500
+
+    run_write('''
+        UPDATE dispatch_teams
+        SET status = 'COMPLETED'
+        WHERE team_id = %s AND status IN ('DEPLOYED', 'EN_ROUTE', 'ON_SCENE')
+    ''', (team_id,))
+
+    return jsonify({'status': 'success', 'message': 'Team recalled'})
+
+
+@api_bp.route('/resources', methods=['POST'])
+def create_resource():
+    data = request.get_json() or {}
+    # Accept multiple possible column naming styles
+    name = (data.get('resource_name') or data.get('name') or '').strip()
+    rtype = (data.get('resource_type') or data.get('type') or 'General').strip()
+    qty = int(data.get('quantity_available') or data.get('quantity') or 0)
+    unit = (data.get('unit') or 'Units').strip()
+    if not name:
+        return jsonify({'status': 'error', 'message': 'resource_name required'}), 400
+
+    # Try common column sets used across schema versions
+    last_id, err = run_write('''
+        INSERT INTO resources (resource_name, resource_type, quantity_available, unit)
+        VALUES (%s, %s, %s, %s)
+    ''', (name, rtype, qty, unit))
+
+    if err:
+        # Fallback schema: name / type / quantity
+        last_id, err = run_write('''
+            INSERT INTO resources (name, type, quantity, unit)
+            VALUES (%s, %s, %s, %s)
+        ''', (name, rtype, qty, unit))
+
+    if err:
+        return jsonify({'status': 'error', 'message': err}), 500
+    return jsonify({'status': 'success', 'resource_id': last_id}), 201
+
+
+@api_bp.route('/hospitals', methods=['POST'])
+def create_hospital():
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    location = (data.get('location') or '').strip()
+    total = int(data.get('total_beds') or 0)
+    occupied = int(data.get('occupied_beds') or 0)
+    if not name or total <= 0:
+        return jsonify({'status': 'error', 'message': 'name and total_beds required'}), 400
+
+    last_id, err = run_write('''
+        INSERT INTO hospitals (name, location, total_beds, occupied_beds)
+        VALUES (%s, %s, %s, %s)
+    ''', (name, location, total, occupied))
+    if err:
+        return jsonify({'status': 'error', 'message': err}), 500
+    return jsonify({'status': 'success', 'hospital_id': last_id}), 201
+
+# =====================================================================
 # ALERTS
 # =====================================================================
 
@@ -558,3 +776,20 @@ def ack_alert(alert_id):
     if err:
         return jsonify({'status': 'error', 'message': err}), 500
     return jsonify({'status': 'success', 'message': 'Alert acknowledged'})
+
+@api_bp.route('/alerts', methods=['POST'])
+def create_alert():
+    data = request.get_json() or {}
+    level = (data.get('alert_level') or 'INFO').upper()
+    message = (data.get('message') or '').strip()
+    if not message:
+        return jsonify({'status': 'error', 'message': 'message required'}), 400
+    if level not in ('CRITICAL', 'HIGH', 'INFO'):
+        level = 'INFO'
+    last_id, err = run_write('''
+        INSERT INTO alerts (alert_level, message, is_acknowledged)
+        VALUES (%s, %s, FALSE)
+    ''', (level, message))
+    if err:
+        return jsonify({'status': 'error', 'message': err}), 500
+    return jsonify({'status': 'success', 'alert_id': last_id}), 201
