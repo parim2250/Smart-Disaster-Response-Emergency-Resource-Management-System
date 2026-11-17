@@ -671,6 +671,150 @@ function loadIncidentsView() {
             if (typeof loadMapIncidents === 'function') loadMapIncidents();
         }
 
+
+function openRegisterIncidentModal() {
+    openModal(
+        'REGISTER NEW INCIDENT',
+        `
+            <div class="form-grid">
+                <div class="full form-group">
+                    <label>INCIDENT TITLE</label>
+                    <input id="f-inc-title" placeholder="e.g. Major Flooding at Kaziranga" />
+                </div>
+                <div class="form-group">
+                    <label>INCIDENT TYPE</label>
+                    <select id="f-inc-type">
+                        <option value="FIRE">FIRE</option>
+                        <option value="FLOOD">FLOOD</option>
+                        <option value="HAZMAT">HAZMAT</option>
+                        <option value="MEDICAL">MEDICAL</option>
+                        <option value="ACCIDENT">ACCIDENT</option>
+                        <option value="OTHER">OTHER</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>SEVERITY</label>
+                    <select id="f-inc-sev">
+                        <option value="CRITICAL">CRITICAL</option>
+                        <option value="HIGH">HIGH</option>
+                        <option value="MODERATE" selected>MODERATE</option>
+                        <option value="LOW">LOW</option>
+                    </select>
+                </div>
+                <div class="full form-group">
+                    <label>LOCATION (City, State)</label>
+                    <input id="f-inc-loc" placeholder="e.g. Guwahati, Assam" />
+                </div>
+                <div class="form-group">
+                    <label>LATITUDE (Optional)</label>
+                    <input id="f-inc-lat" placeholder="Auto-geocoded if blank" />
+                </div>
+                <div class="form-group">
+                    <label>LONGITUDE (Optional)</label>
+                    <input id="f-inc-lng" placeholder="Auto-geocoded if blank" />
+                </div>
+            </div>
+        `,
+        async (root) => {
+            let lat = root.querySelector('#f-inc-lat').value.trim();
+            let lng = root.querySelector('#f-inc-lng').value.trim();
+            let locationDesc = root.querySelector('#f-inc-loc').value.trim();
+
+            // SMART GEOCODING — bias to India, try multiple query shapes
+            if ((!lat || !lng) && locationDesc) {
+                const tryQueries = [
+                    locationDesc + ', India',
+                    locationDesc,
+                    // If user typed a state/city keyword, query state center
+                    locationDesc.split(',')[0].trim() + ', India'
+                ];
+
+                for (const q of tryQueries) {
+                    try {
+                        const geoRes = await fetch(
+                            'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=in&q=' +
+                            encodeURIComponent(q),
+                            { headers: { 'Accept-Language': 'en', 'User-Agent': 'SENTINEL-Emergency-System/1.0' } }
+                        ).then(r => r.json());
+
+                        if (geoRes && geoRes.length > 0) {
+                            lat = geoRes[0].lat;
+                            lng = geoRes[0].lon;
+                            console.log('[SENTINEL] Geocoded', q, '→', lat, lng, geoRes[0].display_name);
+                            break;
+                        }
+                    } catch (e) {
+                        console.log('Geocode attempt failed for', q);
+                    }
+                }
+            }
+
+            // Last-resort: known Indian state/city centroids (so Assam never becomes Noida)
+            if ((!lat || !lng) && locationDesc) {
+                const key = locationDesc.toLowerCase();
+                const centroids = {
+                    'assam': [26.2006, 92.9376], 'guwahati': [26.1445, 91.7362],
+                    'bihar': [25.0961, 85.3131], 'patna': [25.5941, 85.1376],
+                    'west bengal': [22.9868, 87.8550], 'kolkata': [22.5726, 88.3639],
+                    'odisha': [20.9517, 85.0985], 'kerala': [10.8505, 76.2711],
+                    'tamil nadu': [11.1271, 78.6569], 'chennai': [13.0827, 80.2707],
+                    'maharashtra': [19.7515, 75.7139], 'mumbai': [19.0760, 72.8777],
+                    'delhi': [28.6139, 77.2090], 'uttar pradesh': [26.8467, 80.9462],
+                    'lucknow': [26.8467, 80.9462], 'noida': [28.5355, 77.3910],
+                    'rajasthan': [27.0238, 74.2179], 'jaipur': [26.9124, 75.7873],
+                    'gujarat': [22.2587, 71.1924], 'ahmedabad': [23.0225, 72.5714],
+                    'punjab': [31.1471, 75.3412], 'haryana': [29.0588, 76.0856],
+                    'madhya pradesh': [22.9734, 78.6569], 'telangana': [18.1124, 79.0193],
+                    'hyderabad': [17.3850, 78.4867], 'karnataka': [15.3173, 75.7139],
+                    'bengaluru': [12.9716, 77.5946], 'jammu': [32.7266, 74.8570]
+                };
+                for (const name in centroids) {
+                    if (key.indexOf(name) !== -1) {
+                        lat = String(centroids[name][0]);
+                        lng = String(centroids[name][1]);
+                        console.log('[SENTINEL] Centroid fallback for', name, lat, lng);
+                        break;
+                    }
+                }
+            }
+
+            const payload = {
+                title: root.querySelector('#f-inc-title').value.trim(),
+                incident_type: root.querySelector('#f-inc-type').value,
+                severity: root.querySelector('#f-inc-sev').value,
+                location_desc: locationDesc,
+                latitude: lat || null,
+                longitude: lng || null
+            };
+
+            if (!payload.title || !payload.location_desc) {
+                throw new Error('Title and Location Description are required.');
+            }
+
+            // Warn operator if still no coordinates
+            if (!payload.latitude || !payload.longitude) {
+                console.warn('[SENTINEL] No coordinates resolved for:', locationDesc);
+            }
+
+            const res = await fetch('/api/incidents', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(r => r.json());
+
+            if (res.status !== 'success') throw new Error(res.message || 'Registration failed');
+            
+            // 1. Refresh the table view
+            loadIncidentsView();
+            
+            // 2. If the map is currently active in the background, refresh it
+            if (sentinelMap && typeof loadMapIncidents === 'function') {
+                loadMapIncidents();
+            }
+        }
+    );
+}
+
 /* 2. Victims Module */
 function loadVictimsView() {
     fetch('/api/victims')
